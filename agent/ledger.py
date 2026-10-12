@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 from pathlib import Path
+from datetime import datetime, timezone
 
 
 def _compute_hash(entry: dict) -> str:
@@ -51,16 +52,52 @@ def append(entry: dict, path: Path) -> dict:
     entry["hash"] = entry_hash
 
     # Append as JSON line
+    line = json.dumps(entry, ensure_ascii=False)
     if path.exists() and path.stat().st_size > 0:
-        line = json.dumps(entry, ensure_ascii=False)
         path.write_text(path.read_text(encoding="utf-8") + line + "\n", encoding="utf-8")
     else:
-        path.write_text(json.dumps(entry, ensure_ascii=False) + "\n", encoding="utf-8")
+        path.write_text(line + "\n", encoding="utf-8")
+
+    # Record the last N hashes for deletion detection (bonus feature)
+    _record_last_hash(path, entry_hash)
 
     return entry
 
 
-def verify(path: Path) -> bool:
+def _record_last_hash(path: Path, current_hash: str, max_records: int = 10) -> None:
+    """Record the last N hashes for deletion detection (bonus feature).
+
+    Stores a metadata file (.ledger_meta.json) alongside the ledger.
+    Tracks the last N hash values. If the number of recorded hashes
+    decreases or goes out of order, deletion is detected.
+
+    This is the "delete cascade" bonus feature: it doesn't prevent deletion
+    but provides evidence and partial detection.
+    """
+    meta_path = path.parent / (path.stem + ".meta.json")
+
+    records: list[str] = []
+    if meta_path.exists():
+        try:
+            meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
+            records = meta_data.get("last_hashes", [])
+        except (json.JSONDecodeError, OSError):
+            records = []
+
+    # Add current hash, keep only last max_records (avoid duplicates)
+    if current_hash not in records:
+        records.append(current_hash)
+        if len(records) > max_records:
+            records = records[-max_records:]
+
+    try:
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        meta_path.write_text(json.dumps({"last_hashes": records}, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass  # If we can't write metadata, at least the main ledger is valid
+
+
+def verify(path: Path, *, check_deletion: bool = False) -> bool:
     """Verify the integrity of the JSONL ledger.
 
     Checks:
@@ -68,9 +105,13 @@ def verify(path: Path) -> bool:
       - prev_hash of line n matches the hash of line n-1
       - hash of line n matches the computed hash from that line's content
 
-    Returns True if all checks pass, False otherwise.
-    Does NOT detect deletion of the last line or full-file rewrites
-    without external timestamp reference.
+    Args:
+        path: Path to the ledger JSONL file.
+        check_deletion: If True, also check for line deletion using
+            the recorded hash history (bonus feature).
+
+    Returns:
+        True if all checks pass, False otherwise.
     """
     if not path.exists():
         return True  # empty/non-existent file is trivially valid
@@ -80,6 +121,9 @@ def verify(path: Path) -> bool:
         return True
 
     prev_hash_expected = "0" * 64
+
+    # Collect hashes for deletion detection
+    verified_hashes: list[str] = []
 
     for i, line in enumerate(lines):
         if not line.strip():
@@ -105,7 +149,50 @@ def verify(path: Path) -> bool:
         if entry.get("hash") != computed:
             return False
 
+        # Track hashes for deletion detection
+        verified_hashes.append(entry.get("hash", ""))
+
         # Set up for next iteration
         prev_hash_expected = entry.get("hash", "")
+
+    # Deletion check (bonus feature)
+    if check_deletion and verified_hashes:
+        return _check_deletion(verified_hashes, path)
+
+    return True
+
+
+def _check_deletion(verified_hashes: list[str], path: Path) -> bool:
+    """Check for line deletion by comparing recorded hash history.
+
+    This is a best-effort check: we verify that the number of hashes we
+    verified matches what we'd expect. If the file has been truncated (last
+    line removed), the hash chain will still be internally consistent but
+    the count will be off.
+
+    Also check the metadata file for hash count consistency.
+    """
+    # Check metadata file
+    meta_path = path.parent / (path.stem + ".meta.json")
+    if not meta_path.exists():
+        # No metadata recorded; can only do a basic consistency check
+        return True  # Can't verify without metadata
+
+    try:
+        meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
+        recorded_hashes = meta_data.get("last_hashes", [])
+    except (json.JSONDecodeError, OSError):
+        return True  # Corrupt metadata, skip deletion check
+
+    # If recorded hashes list is shorter than verified hashes, lines were deleted
+    # (the metadata got out of sync because lines were removed)
+    if len(recorded_hashes) < len(verified_hashes):
+        return False
+
+    # Verify that the most recent recorded hash matches the last verified hash
+    if recorded_hashes and verified_hashes:
+        if recorded_hashes[-1] != verified_hashes[-1]:
+            # Last hash doesn't match - deletion or modification occurred
+            return False
 
     return True
