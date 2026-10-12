@@ -1,4 +1,4 @@
-# Đánh giá tác động dữ liệu (DPIA) - bản tin cỉng
+# Đánh giá tác động dữ liệu (DPIA) - bản phân tích
 
 ## 1. Loại dữ liệu và phân loại
 
@@ -38,7 +38,7 @@
 
 ## 5. Giới hạn của mock setup
 
-- Dữ liệu là **synthetic**, không phải patient/data thật
+- Dữ liệu là **synthetic**, không phải dữ liệu thật
 - Agent chạy trong environment kiểm soát (localhost only)
 - Không có kết nối đến external services thật
 - Không thể khẳng định tuân thủ điều khoản pháp luật cụ thể
