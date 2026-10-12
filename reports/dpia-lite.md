@@ -4,10 +4,10 @@
 
 | Loại dữ liệu | Phân loại | Ví dụ trong lab |
 |---|---|---|
-| CCCD (Chứng minh công dân) | Ri tư | `811753472374`, `304918277561` |
-| SĐT (Số điện thoại) | Ri tư | `0861707895`, `0938114772` |
-| Tài khoản ngân hàng | Ri tư | `9103069783`, `5520417398` |
-| Email | Ri tư | `le.thu.trang666@example.vn` |
+| CCCD (Chứng minh công dân) | Riêng tư | `811753472374`, `304918277561` |
+| SĐT (Số điện thoại) | Riêng tư | `0861707895`, `0938114772` |
+| Tài khoản ngân hàng | Riêng tư | `9103069783`, `5520417398` |
+| Email | Riêng tư | `le.thu.trang666@example.vn` |
 | Tên khách hàng | Công khai | Lê Thu Trang, Bùi Khánh Vy |
 
 ## 2. Mục đích xử lý và principal
