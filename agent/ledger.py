@@ -1,48 +1,111 @@
-"""BƯỚC 3d — audit ledger append-only, tamper-evident (10').
+"""BƯỚC 3d — audit ledger append-only, tamper-evident (10')."""
 
-JSONL, mỗi tool call một dòng. Đọc CHECKPOINTS.md (§3d).
-
-Interface bắt buộc (tests/test_ledger.py và agent/runner.py gọi trực tiếp):
-
-    append(entry: dict, path: pathlib.Path) -> dict
-        `entry` phải có tối thiểu các field:
-            ts, agent_id, run_id, tool, args_hash, classification,
-            decision, reason
-        Hàm tự thêm 2 field:
-            prev_hash  = hash của dòng ngay trước trong file này, hoặc
-                         "0" * 64 nếu là dòng đầu tiên
-            hash       = sha256 tính từ nội dung dòng NÀY (bao gồm cả
-                         prev_hash, KHÔNG bao gồm field hash) — dùng
-                         json.dumps(..., sort_keys=True) trước khi hash
-                         để thứ tự field không ảnh hưởng kết quả.
-        Append 1 dòng JSON (utf-8, ensure_ascii=False) vào cuối `path`,
-        tạo file/thư mục cha nếu chưa có. Trả về dict đầy đủ đã ghi
-        (bao gồm prev_hash/hash).
-
-    verify(path: pathlib.Path) -> bool
-        Đọc toàn bộ file, trả về True nếu TẤT CẢ đều đúng:
-          - mọi dòng có `reason` non-empty
-          - prev_hash của dòng n == hash đã lưu của dòng n-1 (dòng đầu so
-            với "0" * 64)
-          - hash lưu trong dòng n khớp lại khi tính lại từ nội dung dòng đó
-        Trả về False nếu một dòng còn trong file bị sửa mà không tính lại
-        hash, nếu xoá/chèn giữa file làm đứt liên kết, hoặc thiếu reason.
-        Chỉ kiểm tra file hiện có KHÔNG phát hiện được việc xoá dòng cuối
-        hoặc viết lại cả file và tính lại chuỗi. Muốn phát hiện cắt đuôi
-        phải lưu hash/số dòng cuối ở một nơi tin cậy bên ngoài file rồi
-        đối chiếu. Bài lab không cung cấp mốc đó.
-
-Sinh viên phải tự tay chứng minh được: sửa 1 ký tự trong 1 dòng giữa file
-rồi gọi verify() phải trả về False.
-"""
 from __future__ import annotations
 
+import json
+import hashlib
 from pathlib import Path
 
 
+def _compute_hash(entry: dict) -> str:
+    """Compute SHA-256 hash of an entry (excluding the `hash` field).
+
+    Uses sorted keys so field order doesn't affect the hash.
+    """
+    entry_copy = {k: v for k, v in entry.items() if k != "hash"}
+    payload = json.dumps(entry_copy, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def append(entry: dict, path: Path) -> dict:
-    raise NotImplementedError("BƯỚC 3d: implement ledger append")
+    """Append an entry to the JSONL ledger with hash chain.
+
+    Entry must have minimum fields: ts, agent_id, run_id, tool, args_hash,
+    classification, decision, reason.
+
+    The function adds:
+      - prev_hash: hash of previous line, or "0" * 64 for first entry
+      - hash: SHA-256 of this entry's content (including prev_hash)
+
+    Returns the full dict including computed prev_hash and hash.
+    """
+    # Ensure parent directory exists
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Read previous hash (from existing file, if any)
+    prev_hash = "0" * 64
+    if path.exists() and path.stat().st_size > 0:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            if lines:
+                last_entry = json.loads(lines[-1])
+                prev_hash = last_entry.get("hash", "0" * 64)
+        except (json.JSONDecodeError, OSError):
+            prev_hash = "0" * 64
+
+    # Compute this entry's hash
+    entry_hash = _compute_hash({**entry, "prev_hash": prev_hash})
+
+    # Attach chain fields
+    entry["prev_hash"] = prev_hash
+    entry["hash"] = entry_hash
+
+    # Append as JSON line
+    if path.exists() and path.stat().st_size > 0:
+        line = json.dumps(entry, ensure_ascii=False)
+        path.write_text(path.read_text(encoding="utf-8") + line + "\n", encoding="utf-8")
+    else:
+        path.write_text(json.dumps(entry, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    return entry
 
 
 def verify(path: Path) -> bool:
-    raise NotImplementedError("BƯỚC 3d: implement ledger verify")
+    """Verify the integrity of the JSONL ledger.
+
+    Checks:
+      - Every line has a non-empty `reason`
+      - prev_hash of line n matches the hash of line n-1
+      - hash of line n matches the computed hash from that line's content
+
+    Returns True if all checks pass, False otherwise.
+    Does NOT detect deletion of the last line or full-file rewrites
+    without external timestamp reference.
+    """
+    if not path.exists():
+        return True  # empty/non-existent file is trivially valid
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        return True
+
+    prev_hash_expected = "0" * 64
+
+    for i, line in enumerate(lines):
+        if not line.strip():
+            continue
+        entry = json.loads(line)
+
+        # Check reason is non-empty
+        if not entry.get("reason"):
+            return False
+
+        # Check prev_hash chain
+        if i == 0:
+            # First entry should have prev_hash = "0" * 64
+            if entry.get("prev_hash") != "0" * 64:
+                return False
+        else:
+            # prev_hash should match previous entry's hash
+            if entry.get("prev_hash") != prev_hash_expected:
+                return False
+
+        # Verify this entry's hash
+        computed = _compute_hash({k: v for k, v in entry.items() if k != "hash"})
+        if entry.get("hash") != computed:
+            return False
+
+        # Set up for next iteration
+        prev_hash_expected = entry.get("hash", "")
+
+    return True

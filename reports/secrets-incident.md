@@ -1,8 +1,8 @@
-# Secret giả trong lịch sử Git — điền trong checkpoint 4
+# Secret giả trong lịch sử Git — Checkpoint 4
 
-- Scanner và phiên bản:
-- Commit chứa token giả:
-- File, rule và kết quả quét lịch sử:
-- Kết quả quét file hiện tại:
-- Nếu đây là credential thật, cần xử lý thế nào:
-- Vì sao xoá file khỏi HEAD hoặc pin dependency vẫn chưa đủ:
+- **Scanner và phiên bản**: Gitleaks v8.30.1 quét lịch sử commit
+- **Commit chứa token giả**: `1bdd849` — commit đầu tiên seeding bài lab với token giả
+- **File, rule và kết quả quét lịch sử**: Token `LAB24_FAKE_TOKEN=LAB24-DEMO-ABCD1234EF567890` được xác định bởi rule `lab24-synthetic-token` trong `.gitleaks.toml`. Quét `gitleaks git --config .gitleaks.toml .` thoát với exit code 1 và báo finding ở commit `1bdd849`.
+- **Kết quả quét file hiện tại**: Quét file có sẵn (`gitleaks dir --config .gitleaks.toml .`) không báo finding, vì token giả chỉ tồn tại trong lịch sử Git đã được xoá khỏi HEAD.
+- **Nếu đây là credential thật, cần xử lý thế nào**: Nếu đây là credential thật, cần thu hồi (rotate) token đó ngay lập tức và thông báo cho toàn-team. LABEL24_FAKE_TOKEN là token mẫu chỉ dùng cho mục đích lab, không bao giờ deploy lên production.
+- **Tại sao xoá file khỏi HEAD hoặc pin dependency vẫn chưa đủ**: Chỉ xoá file khỏi HEAD vẫn để lại dấu tích trong lịch sử Git (git history). Các bản commit cũ vẫn chứa credential. Cần dùng `git filter-branch` hoặc `git reset --hard` để xóa vĩnh viễn từ lịch sử, cùng với pin dependency (`requirements.lock` + `pre-commit-config.yaml`) để đảm bảo equipe không tái cài package có credential thật. Việc pin phiên bản Gitleaks v8.30.1 chỉ phát hiện token giả đã.seed ở trên; không thay thế cần quay lại xoá an toàn khỏi history và rotate credential thực tế.

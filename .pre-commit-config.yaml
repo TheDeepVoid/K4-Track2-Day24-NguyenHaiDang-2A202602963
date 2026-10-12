@@ -1,0 +1,19 @@
+# Pre-commit configuration for Day 24 lab
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks-system
+        pass_filenames: false
+  - repo: local
+    hooks:
+      - id: gitleaks-dir
+        name: gitleaks dir
+        entry: gitleaks dir --config .gitleaks.toml .
+        language: system
+        always_run: true
+      - id: gitleaks-git
+        name: gitleaks git
+        entry: gitleaks git --config .gitleaks.toml .
+        language: system
+        always_run: true
